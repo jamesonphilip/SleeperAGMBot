@@ -392,25 +392,29 @@ Provide:
                 scoring_table = pd.DataFrame(scoring_settings.items(), columns=["Stat", "Points"])
                 st.dataframe(scoring_table)
 
-        # --- WAIVER WIRE AI TARGETS TAB ---
-        with tab3:
-            st.header("📈 AI-Powered Waiver Wire Targets")
+# --- WAIVER WIRE AI TARGETS TAB ---
 
-            if st.button("🔍 Analyze Waiver Wire"):
-                with st.spinner("Analyzing Free Agents with DeepSeek..."):
-                    free_agents = get_free_agents(players_data, league_owned_players, rookie_names, dynasty_rankings)
-                    team_needs = analyze_team_needs(starters_list, bench_list)
-                    waiver_prompt = build_waiver_prompt(free_agents, team_needs)
-                    waiver_analysis = deepseek_waiver_recommendations(waiver_prompt)
+with tab3:
+    st.header("📈 AI-Powered Waiver Wire Targets")
 
-                    if waiver_analysis:
-                        st.success("AI Waiver Wire Analysis Ready!")
-                        st.text_area("Top 10 Waiver Recommendations", value=waiver_analysis, height=500)
-                        st.download_button(
-                            "⬇️ Download Waiver Analysis as PDF",
-                            generate_pdf(waiver_analysis).output(dest='S').encode('latin1'),
-                            file_name="waiver_wire_analysis.pdf",
-                            mime="application/pdf"
-                        )
-                    else:
-                        st.error("DeepSeek waiver analysis failed.")
+    if st.button("🔍 Analyze Waiver Wire"):
+        with st.spinner("Analyzing Free Agents with DeepSeek..."):
+            free_agents = get_free_agents(players_data, league_owned_players, rookie_names, dynasty_rankings)
+
+            # Use new smart prompt builder
+            waiver_prompt = build_waiver_prompt_v2(starters_list, bench_list, free_agents)
+
+            waiver_analysis = deepseek_waiver_recommendations(waiver_prompt)
+
+            if waiver_analysis:
+                st.success("AI Waiver Wire Analysis Ready!")
+                st.text_area("Top 10 Waiver Recommendations", value=waiver_analysis, height=500)
+                st.download_button(
+                    "⬇️ Download Waiver Analysis as PDF",
+                    generate_pdf(waiver_analysis).output(dest='S').encode('latin1'),
+                    file_name="waiver_wire_analysis.pdf",
+                    mime="application/pdf"
+                )
+            else:
+                st.error("DeepSeek waiver analysis failed.")
+        
