@@ -8,6 +8,24 @@ from bs4 import BeautifulSoup
 import lxml
 from fpdf import FPDF
 
+# --- FantasyPros Dynasty Rookie Rankings Scraper ---
+def get_rookie_names():
+    """Scrape FantasyPros Dynasty Rookie Rankings to get current rookie names."""
+    rookie_url = "https://www.fantasypros.com/nfl/rankings/dynasty-rookies.php"
+    response = requests.get(rookie_url)
+    soup = BeautifulSoup(response.content, "lxml")
+    rookie_names = []
+
+    table = soup.find("table", {"id": "rank-data"})
+    if table:
+        rows = table.find_all("tr")[1:]  # Skip header
+        for row in rows:
+            cols = row.find_all("td")
+            if len(cols) >= 2:
+                player_name = cols[1].get_text(strip=True)
+                rookie_names.append(player_name)
+    return rookie_names
+
 # --- Configuration ---
 DEEPSEEK_API_KEY = "sk-efec2ddcafba46ff949e25dad349a0c2"
 FANTASYPROS_DYNASTY_RANKINGS_URL = "https://www.fantasypros.com/nfl/rankings/dynasty-overall.php"
@@ -222,18 +240,22 @@ if username and season:
 
         starters_list = []
         bench_list = []
-        available_rookies = []
+        # --- Pull Rookie Names Dynamically ---
+rookie_names = get_rookie_names()
 
-        for pid in user_roster.get('starters', []):
-            p = players_data.get(pid, {})
-            starters_list.append({
-                "Name": p.get("full_name", "Unknown"),
-                "Position": p.get("position", "UNK"),
-                "NFL Team": p.get("team", "UNK"),
-                "Age": p.get("age", "UNK"),
-                "Dynasty Rank": find_dynasty_rank(p.get("full_name", ""), dynasty_rankings),
-                "Trade Value": estimate_trade_value(find_dynasty_rank(p.get("full_name", ""), dynasty_rankings))
-            })
+available_rookies = []
+
+for pid, pdata in players_data.items():
+    player_name = pdata.get("full_name", "Unknown")
+    if player_name in rookie_names and pid not in league_owned_players:
+        available_rookies.append({
+            "Name": player_name,
+            "Position": pdata.get("position", "UNK"),
+            "NFL Team": pdata.get("team", "UNK"),
+            "Age": pdata.get("age", "UNK"),
+            "Dynasty Rank": find_dynasty_rank(player_name, dynasty_rankings),
+            "Trade Value": estimate_trade_value(find_dynasty_rank(player_name, dynasty_rankings))
+        })
 
         for pid in user_roster.get('players', []):
             if pid not in user_roster.get('starters', []):
