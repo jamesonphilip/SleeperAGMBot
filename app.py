@@ -131,7 +131,7 @@ def analyze_with_deepseek(prompt):
 # --- Waiver Wire Helpers ---
 
 def get_free_agents(players_data, league_owned_players, rookie_names, dynasty_rankings):
-    """Find available free agents with dynasty rank info."""
+    """Find available free agents including ones without dynasty rank."""
     free_agents = []
     for pid, pdata in players_data.items():
         player_name = pdata.get("full_name", "Unknown")
@@ -144,8 +144,11 @@ def get_free_agents(players_data, league_owned_players, rookie_names, dynasty_ra
                 "Dynasty Rank": find_dynasty_rank(player_name, dynasty_rankings),
                 "Rookie": player_name in rookie_names
             })
-    free_agents = [fa for fa in free_agents if isinstance(fa["Dynasty Rank"], int)]
-    free_agents = sorted(free_agents, key=lambda x: x["Dynasty Rank"])
+    # Sort: players with dynasty rank first, then others
+    free_agents = sorted(
+        free_agents,
+        key=lambda x: x["Dynasty Rank"] if isinstance(x["Dynasty Rank"], int) else 9999
+    )
     return free_agents
 
 def build_waiver_prompt_v2(starters_list, bench_list, free_agents):
