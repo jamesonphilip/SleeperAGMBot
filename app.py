@@ -6,7 +6,6 @@ import pandas as pd
 import json
 from bs4 import BeautifulSoup
 import lxml
-from fpdf import FPDF
 
 # --- Configuration ---
 DEEPSEEK_API_KEY = "sk-efec2ddcafba46ff949e25dad349a0c2"
@@ -129,22 +128,7 @@ def analyze_with_deepseek(prompt):
         st.error(f"DeepSeek Connection Error: {e}")
         return None
 
-# --- PDF Generator ---
-def generate_pdf(text):
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_auto_page_break(auto=True, margin=15)
-    pdf.set_font("Arial", size=12)
-    for line in text.split('\n'):
-        if len(line) > 100:
-            words = [line[i:i+80] for i in range(0, len(line), 80)]
-            for word in words:
-                pdf.multi_cell(0, 10, word)
-        else:
-            pdf.multi_cell(0, 10, line)
-    return pdf
-
-# --- Waiver Helpers ---
+# --- Waiver Wire Helpers ---
 
 def get_free_agents(players_data, league_owned_players, rookie_names, dynasty_rankings):
     """Find available free agents with dynasty rank info."""
@@ -164,61 +148,36 @@ def get_free_agents(players_data, league_owned_players, rookie_names, dynasty_ra
     free_agents = sorted(free_agents, key=lambda x: x["Dynasty Rank"])
     return free_agents
 
-def analyze_team_needs(starters_list, bench_list):
-    """Analyze your team positional depth."""
-    position_counts = {"QB": 0, "RB": 0, "WR": 0, "TE": 0}
-    for player in starters_list + bench_list:
-        pos = player.get("Position", "UNK")
-        if pos in position_counts:
-            position_counts[pos] += 1
-    return position_counts
-
-def build_waiver_prompt(free_agents, team_needs):
-    """Create a prompt to ask DeepSeek for top 10 waiver targets."""
+def build_waiver_prompt_v2(starters_list, bench_list, free_agents):
+    """Create an AI prompt that lets DeepSeek detect weaknesses and suggest best free agents."""
     short_list = free_agents[:30]
+
     prompt = f"""
-You are helping a Dynasty fantasy football manager find waiver wire targets.
+You are helping a Dynasty fantasy football manager improve their roster via waiver wire pickups.
 
-Here is their current team needs based on positional depth:
-{team_needs}
+Here is the user's current roster:
 
-Here are available free agents in the league (sorted by dynasty value):
+**Starters:**
+{json.dumps(starters_list, indent=2)}
+
+**Bench:**
+{json.dumps(bench_list, indent=2)}
+
+Here are the available free agents in the league (sorted by dynasty value):
 
 {json.dumps(short_list, indent=2)}
 
-Please:
-
-- Recommend the 10 best free agents to target
-- Rank them from 1 to 10
-- For each player, include a short 1-2 sentence justification why they fit this user's team (consider position needs, upside, roster construction)
-- Format response cleanly so it can be displayed in a table
+Instructions:
+1. Analyze the user's current team positional strengths and weaknesses
+2. Identify the 10 best available free agents that would improve their roster
+3. For each recommendation, include:
+    - Player Name
+    - Position
+    - Short 1-2 sentence justification why they fit (based on team need, upside, roster balance, dynasty value)
+4. Format cleanly in a markdown table: Rank | Player | Pos | Justification
 """
-    return prompt
 
-def deepseek_waiver_recommendations(prompt):
-    headers = {
-        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "model": "deepseek-chat",
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.7
-    }
-    try:
-        response = requests.post(
-            "https://api.deepseek.com/v1/chat/completions",
-            headers=headers,
-            json=payload
-        )
-        if response.status_code == 200:
-            return response.json()['choices'][0]['message']['content']
-        else:
-            st.error(f"DeepSeek Error {response.status_code}: {response.text}")
-            return None
-    except Exception as e:
-        st.error(f"DeepSeek Connection Error: {e}")
-        return None
+    return prompt
 
 # --- Streamlit App UI ---
 
@@ -340,7 +299,6 @@ if username and season:
             else:
                 st.write("No available rookies found.")
 
-            # DeepSeek Full Team Analyzer
             st.subheader("🧠 DeepSeek Dynasty Analysis")
             team_prompt = f"""
 Analyze my fantasy football dynasty roster.
@@ -367,12 +325,6 @@ Provide:
                     if team_analysis:
                         st.success("Analysis Ready!")
                         st.text_area("Team Analysis", value=team_analysis, height=400)
-                        st.download_button(
-                            "⬇️ Download Analysis as PDF",
-                            generate_pdf(team_analysis).output(dest='S').encode('latin1'),
-                            file_name="team_analysis.pdf",
-                            mime="application/pdf"
-                        )
                     else:
                         st.error("DeepSeek analysis failed.")
 
@@ -392,29 +344,18 @@ Provide:
                 scoring_table = pd.DataFrame(scoring_settings.items(), columns=["Stat", "Points"])
                 st.dataframe(scoring_table)
 
-# --- WAIVER WIRE AI TARGETS TAB ---
+        # --- WAIVER WIRE AI TARGETS TAB ---
+        with tab3:
+            st.header("📈 AI-Powered Waiver Wire Targets")
 
-with tab3:
-    st.header("📈 AI-Powered Waiver Wire Targets")
+            if st.button("🔍 Analyze Waiver Wire"):
+                with st.spinner("Analyzing Free Agents with DeepSeek..."):
+                    free_agents = get_free_agents(players_data, league_owned_players, rookie_names, dynasty_rankings)
+                    waiver_prompt = build_waiver_prompt_v2(starters_list, bench_list, free_agents)
+                    waiver_analysis = analyze_with_deepseek(waiver_prompt)
 
-    if st.button("🔍 Analyze Waiver Wire"):
-        with st.spinner("Analyzing Free Agents with DeepSeek..."):
-            free_agents = get_free_agents(players_data, league_owned_players, rookie_names, dynasty_rankings)
-
-            # Use new smart prompt builder
-            waiver_prompt = build_waiver_prompt_v2(starters_list, bench_list, free_agents)
-
-            waiver_analysis = deepseek_waiver_recommendations(waiver_prompt)
-
-            if waiver_analysis:
-                st.success("AI Waiver Wire Analysis Ready!")
-                st.text_area("Top 10 Waiver Recommendations", value=waiver_analysis, height=500)
-                st.download_button(
-                    "⬇️ Download Waiver Analysis as PDF",
-                    generate_pdf(waiver_analysis).output(dest='S').encode('latin1'),
-                    file_name="waiver_wire_analysis.pdf",
-                    mime="application/pdf"
-                )
-            else:
-                st.error("DeepSeek waiver analysis failed.")
-        
+                    if waiver_analysis:
+                        st.success("AI Waiver Wire Analysis Ready!")
+                        st.text_area("Top 10 Waiver Recommendations", value=waiver_analysis, height=500)
+                    else:
+                        st.error("DeepSeek waiver analysis failed.")
