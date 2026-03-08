@@ -1,5 +1,6 @@
 # --- Sleeper Dynasty Assistant GM ---
 
+import os
 import streamlit as st
 import requests
 import pandas as pd
@@ -8,54 +9,62 @@ from bs4 import BeautifulSoup
 import lxml
 
 # --- Configuration ---
-DEEPSEEK_API_KEY = "sk-efec2ddcafba46ff949e25dad349a0c2"
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 
 # --- Sleeper API Functions ---
 def get_user_id(username):
     url = f"https://api.sleeper.app/v1/user/{username}"
-    response = requests.get(url)
+    response = requests.get(url, timeout=10)
     if response.status_code == 200:
         return response.json().get("user_id")
     return None
 
 def get_leagues(user_id, season):
     url = f"https://api.sleeper.app/v1/user/{user_id}/leagues/nfl/{season}"
-    response = requests.get(url)
+    response = requests.get(url, timeout=10)
     if response.status_code == 200:
         return response.json()
     return None
 
 def get_league_settings(league_id):
     url = f"https://api.sleeper.app/v1/league/{league_id}"
-    response = requests.get(url)
+    response = requests.get(url, timeout=10)
     if response.status_code == 200:
         return response.json()
     return None
 
 def get_rosters(league_id):
     url = f"https://api.sleeper.app/v1/league/{league_id}/rosters"
-    response = requests.get(url)
+    response = requests.get(url, timeout=10)
     if response.status_code == 200:
         return response.json()
     return None
 
 def get_players():
     url = "https://api.sleeper.app/v1/players/nfl"
-    response = requests.get(url)
+    response = requests.get(url, timeout=30)
     if response.status_code == 200:
         return response.json()
     return None
 
 def get_draft_picks(league_id):
     url = f"https://api.sleeper.app/v1/league/{league_id}/traded_picks"
-    response = requests.get(url)
+    response = requests.get(url, timeout=10)
     if response.status_code == 200:
         return response.json()
     return []
 
 # --- Dynasty Rankings Scraper ---
 def get_dynasty_rankings():
-    response = requests.get("https://www.fantasypros.com/nfl/rankings/dynasty-overall.php")
+    try:
+        response = requests.get(
+            "https://www.fantasypros.com/nfl/rankings/dynasty-overall.php",
+            timeout=10
+        )
+        response.raise_for_status()
+    except requests.RequestException as e:
+        st.warning(f"Could not fetch dynasty rankings: {e}")
+        return {}
     soup = BeautifulSoup(response.content, "lxml")
     rankings = {}
     table = soup.find("table", {"id": "rank-data"})
@@ -65,8 +74,11 @@ def get_dynasty_rankings():
             cols = row.find_all("td")
             if len(cols) >= 3:
                 player_name = cols[1].get_text(strip=True)
-                rank = cols[0].get_text(strip=True)
-                rankings[player_name] = int(rank)
+                rank_text = cols[0].get_text(strip=True)
+                try:
+                    rankings[player_name] = int(rank_text)
+                except ValueError:
+                    pass
     return rankings
 
 def find_dynasty_rank(player_name, rankings):
@@ -89,7 +101,12 @@ def estimate_trade_value(dynasty_rank):
 # --- Dynasty Rookie Scraper ---
 def get_rookie_names():
     rookie_url = "https://www.fantasypros.com/nfl/rankings/dynasty-rookies.php"
-    response = requests.get(rookie_url)
+    try:
+        response = requests.get(rookie_url, timeout=10)
+        response.raise_for_status()
+    except requests.RequestException as e:
+        st.warning(f"Could not fetch rookie rankings: {e}")
+        return []
     soup = BeautifulSoup(response.content, "lxml")
     rookie_names = []
     table = soup.find("table", {"id": "rank-data"})
@@ -204,8 +221,14 @@ if username and season:
 
         league_names = [l.get("name", "Unnamed League") for l in leagues]
         selected_league = st.selectbox("Choose your league:", league_names)
-        league = next(l for l in leagues if l.get("name") == selected_league)
+        league = next((l for l in leagues if l.get("name") == selected_league), None)
+        if not league:
+            st.error("Selected league not found.")
+            st.stop()
         league_id = league.get("league_id")
+        if not league_id:
+            st.error("League ID missing for selected league.")
+            st.stop()
 
     with st.spinner(f"Fetching data for league: {selected_league}..."):
         league_settings = get_league_settings(league_id)
