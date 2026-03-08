@@ -9,7 +9,7 @@ from bs4 import BeautifulSoup
 import lxml
 
 # --- Configuration ---
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
 # --- Sleeper API Functions ---
 def get_user_id(username):
@@ -119,30 +119,31 @@ def get_rookie_names():
                 rookie_names.append(player_name)
     return rookie_names
 
-# --- DeepSeek Generic Analyzer ---
+# --- Gemini Analyzer ---
 def analyze_with_deepseek(prompt):
     headers = {
-        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+        "Authorization": f"Bearer {GEMINI_API_KEY}",
         "Content-Type": "application/json"
     }
     payload = {
-        "model": "deepseek-chat",
+        "model": "gemini-2.0-flash",
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.7
     }
     try:
         response = requests.post(
-            "https://api.deepseek.com/v1/chat/completions",
+            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
             headers=headers,
-            json=payload
+            json=payload,
+            timeout=30
         )
         if response.status_code == 200:
             return response.json()['choices'][0]['message']['content']
         else:
-            st.error(f"DeepSeek Error {response.status_code}: {response.text}")
+            st.error(f"Gemini Error {response.status_code}: {response.text}")
             return None
     except Exception as e:
-        st.error(f"DeepSeek Connection Error: {e}")
+        st.error(f"Gemini Connection Error: {e}")
         return None
 
 # --- Waiver Wire Helpers ---
@@ -169,7 +170,7 @@ def get_free_agents(players_data, league_owned_players, rookie_names, dynasty_ra
     return free_agents
 
 def build_waiver_prompt_v2(starters_list, bench_list, free_agents):
-    """Create an AI prompt that lets DeepSeek detect weaknesses and suggest best free agents."""
+    """Create an AI prompt that lets Gemini detect weaknesses and suggest best free agents."""
     short_list = free_agents[:30]
 
     prompt = f"""
@@ -325,7 +326,7 @@ if username and season:
             else:
                 st.write("No available rookies found.")
 
-            st.subheader("🧠 DeepSeek Dynasty Analysis")
+            st.subheader("🧠 Gemini Dynasty Analysis")
             team_prompt = f"""
 Analyze my fantasy football dynasty roster.
 
@@ -346,13 +347,13 @@ Provide:
 - Dynasty Outlook
 """
             if st.button("Run Full Team Analysis"):
-                with st.spinner("Analyzing with DeepSeek..."):
+                with st.spinner("Analyzing with Gemini..."):
                     team_analysis = analyze_with_deepseek(team_prompt)
                     if team_analysis:
                         st.success("Analysis Ready!")
                         st.text_area("Team Analysis", value=team_analysis, height=400)
                     else:
-                        st.error("DeepSeek analysis failed.")
+                        st.error("Gemini analysis failed.")
 
         # --- LEAGUE INFO TAB ---
         with tab2:
@@ -375,7 +376,7 @@ Provide:
             st.header("📈 AI-Powered Waiver Wire Targets")
 
             if st.button("🔍 Analyze Waiver Wire"):
-                with st.spinner("Analyzing Free Agents with DeepSeek..."):
+                with st.spinner("Analyzing Free Agents with Gemini..."):
                     free_agents = get_free_agents(players_data, league_owned_players, rookie_names, dynasty_rankings)
                     waiver_prompt = build_waiver_prompt_v2(starters_list, bench_list, free_agents)
                     waiver_analysis = analyze_with_deepseek(waiver_prompt)
@@ -384,4 +385,4 @@ Provide:
                         st.success("AI Waiver Wire Analysis Ready!")
                         st.text_area("Top 10 Waiver Recommendations", value=waiver_analysis, height=500)
                     else:
-                        st.error("DeepSeek waiver analysis failed.")
+                        st.error("Gemini waiver analysis failed.")
