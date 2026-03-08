@@ -1,5 +1,6 @@
 # --- Sleeper Dynasty Assistant GM ---
 
+import os
 import streamlit as st
 import requests
 import pandas as pd
@@ -8,54 +9,62 @@ from bs4 import BeautifulSoup
 import lxml
 
 # --- Configuration ---
-DEEPSEEK_API_KEY = "sk-efec2ddcafba46ff949e25dad349a0c2"
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
 # --- Sleeper API Functions ---
 def get_user_id(username):
     url = f"https://api.sleeper.app/v1/user/{username}"
-    response = requests.get(url)
+    response = requests.get(url, timeout=10)
     if response.status_code == 200:
         return response.json().get("user_id")
     return None
 
 def get_leagues(user_id, season):
     url = f"https://api.sleeper.app/v1/user/{user_id}/leagues/nfl/{season}"
-    response = requests.get(url)
+    response = requests.get(url, timeout=10)
     if response.status_code == 200:
         return response.json()
     return None
 
 def get_league_settings(league_id):
     url = f"https://api.sleeper.app/v1/league/{league_id}"
-    response = requests.get(url)
+    response = requests.get(url, timeout=10)
     if response.status_code == 200:
         return response.json()
     return None
 
 def get_rosters(league_id):
     url = f"https://api.sleeper.app/v1/league/{league_id}/rosters"
-    response = requests.get(url)
+    response = requests.get(url, timeout=10)
     if response.status_code == 200:
         return response.json()
     return None
 
 def get_players():
     url = "https://api.sleeper.app/v1/players/nfl"
-    response = requests.get(url)
+    response = requests.get(url, timeout=30)
     if response.status_code == 200:
         return response.json()
     return None
 
 def get_draft_picks(league_id):
     url = f"https://api.sleeper.app/v1/league/{league_id}/traded_picks"
-    response = requests.get(url)
+    response = requests.get(url, timeout=10)
     if response.status_code == 200:
         return response.json()
     return []
 
 # --- Dynasty Rankings Scraper ---
 def get_dynasty_rankings():
-    response = requests.get("https://www.fantasypros.com/nfl/rankings/dynasty-overall.php")
+    try:
+        response = requests.get(
+            "https://www.fantasypros.com/nfl/rankings/dynasty-overall.php",
+            timeout=10
+        )
+        response.raise_for_status()
+    except requests.RequestException as e:
+        st.warning(f"Could not fetch dynasty rankings: {e}")
+        return {}
     soup = BeautifulSoup(response.content, "lxml")
     rankings = {}
     table = soup.find("table", {"id": "rank-data"})
@@ -65,8 +74,11 @@ def get_dynasty_rankings():
             cols = row.find_all("td")
             if len(cols) >= 3:
                 player_name = cols[1].get_text(strip=True)
-                rank = cols[0].get_text(strip=True)
-                rankings[player_name] = int(rank)
+                rank_text = cols[0].get_text(strip=True)
+                try:
+                    rankings[player_name] = int(rank_text)
+                except ValueError:
+                    pass
     return rankings
 
 def find_dynasty_rank(player_name, rankings):
@@ -89,7 +101,12 @@ def estimate_trade_value(dynasty_rank):
 # --- Dynasty Rookie Scraper ---
 def get_rookie_names():
     rookie_url = "https://www.fantasypros.com/nfl/rankings/dynasty-rookies.php"
-    response = requests.get(rookie_url)
+    try:
+        response = requests.get(rookie_url, timeout=10)
+        response.raise_for_status()
+    except requests.RequestException as e:
+        st.warning(f"Could not fetch rookie rankings: {e}")
+        return []
     soup = BeautifulSoup(response.content, "lxml")
     rookie_names = []
     table = soup.find("table", {"id": "rank-data"})
@@ -102,30 +119,31 @@ def get_rookie_names():
                 rookie_names.append(player_name)
     return rookie_names
 
-# --- DeepSeek Generic Analyzer ---
+# --- Gemini Analyzer ---
 def analyze_with_deepseek(prompt):
     headers = {
-        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+        "Authorization": f"Bearer {GEMINI_API_KEY}",
         "Content-Type": "application/json"
     }
     payload = {
-        "model": "deepseek-chat",
+        "model": "gemini-2.0-flash",
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.7
     }
     try:
         response = requests.post(
-            "https://api.deepseek.com/v1/chat/completions",
+            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
             headers=headers,
-            json=payload
+            json=payload,
+            timeout=30
         )
         if response.status_code == 200:
             return response.json()['choices'][0]['message']['content']
         else:
-            st.error(f"DeepSeek Error {response.status_code}: {response.text}")
+            st.error(f"Gemini Error {response.status_code}: {response.text}")
             return None
     except Exception as e:
-        st.error(f"DeepSeek Connection Error: {e}")
+        st.error(f"Gemini Connection Error: {e}")
         return None
 
 # --- Waiver Wire Helpers ---
@@ -152,7 +170,7 @@ def get_free_agents(players_data, league_owned_players, rookie_names, dynasty_ra
     return free_agents
 
 def build_waiver_prompt_v2(starters_list, bench_list, free_agents):
-    """Create an AI prompt that lets DeepSeek detect weaknesses and suggest best free agents."""
+    """Create an AI prompt that lets Gemini detect weaknesses and suggest best free agents."""
     short_list = free_agents[:30]
 
     prompt = f"""
@@ -204,8 +222,14 @@ if username and season:
 
         league_names = [l.get("name", "Unnamed League") for l in leagues]
         selected_league = st.selectbox("Choose your league:", league_names)
-        league = next(l for l in leagues if l.get("name") == selected_league)
+        league = next((l for l in leagues if l.get("name") == selected_league), None)
+        if not league:
+            st.error("Selected league not found.")
+            st.stop()
         league_id = league.get("league_id")
+        if not league_id:
+            st.error("League ID missing for selected league.")
+            st.stop()
 
     with st.spinner(f"Fetching data for league: {selected_league}..."):
         league_settings = get_league_settings(league_id)
@@ -302,7 +326,7 @@ if username and season:
             else:
                 st.write("No available rookies found.")
 
-            st.subheader("🧠 DeepSeek Dynasty Analysis")
+            st.subheader("🧠 Gemini Dynasty Analysis")
             team_prompt = f"""
 Analyze my fantasy football dynasty roster.
 
@@ -323,13 +347,13 @@ Provide:
 - Dynasty Outlook
 """
             if st.button("Run Full Team Analysis"):
-                with st.spinner("Analyzing with DeepSeek..."):
+                with st.spinner("Analyzing with Gemini..."):
                     team_analysis = analyze_with_deepseek(team_prompt)
                     if team_analysis:
                         st.success("Analysis Ready!")
                         st.text_area("Team Analysis", value=team_analysis, height=400)
                     else:
-                        st.error("DeepSeek analysis failed.")
+                        st.error("Gemini analysis failed.")
 
         # --- LEAGUE INFO TAB ---
         with tab2:
@@ -352,7 +376,7 @@ Provide:
             st.header("📈 AI-Powered Waiver Wire Targets")
 
             if st.button("🔍 Analyze Waiver Wire"):
-                with st.spinner("Analyzing Free Agents with DeepSeek..."):
+                with st.spinner("Analyzing Free Agents with Gemini..."):
                     free_agents = get_free_agents(players_data, league_owned_players, rookie_names, dynasty_rankings)
                     waiver_prompt = build_waiver_prompt_v2(starters_list, bench_list, free_agents)
                     waiver_analysis = analyze_with_deepseek(waiver_prompt)
@@ -361,4 +385,4 @@ Provide:
                         st.success("AI Waiver Wire Analysis Ready!")
                         st.text_area("Top 10 Waiver Recommendations", value=waiver_analysis, height=500)
                     else:
-                        st.error("DeepSeek waiver analysis failed.")
+                        st.error("Gemini waiver analysis failed.")
